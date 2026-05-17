@@ -34,6 +34,10 @@
                     <logout-outlined />
                     退出登录
                   </a-menu-item>
+                  <a-menu-item @click="goToUserEdit">
+                    <edit-outlined />
+                    修改信息
+                  </a-menu-item>
                 </a-menu>
               </template>
             </a-dropdown>
@@ -53,7 +57,7 @@ import { computed, h, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { type MenuProps, message } from 'ant-design-vue'
 import { useLoginUserStore } from '@/stores/loginUser.ts'
-import { LogoutOutlined, HomeOutlined } from '@ant-design/icons-vue'
+import { LogoutOutlined, HomeOutlined, EditOutlined } from '@ant-design/icons-vue'
 import { userLogout } from '@/api/userController.ts'
 
 // 获取登录用户状态
@@ -117,6 +121,11 @@ const handleMenuClick: MenuProps['onClick'] = (e) => {
   if (key.startsWith('/')) {
     router.push(key)
   }
+}
+
+// 跳转到用户信息编辑页
+const goToUserEdit = () => {
+  router.push('/user/edit')
 }
 
 // 退出登录

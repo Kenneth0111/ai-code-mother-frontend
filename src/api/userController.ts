@@ -125,3 +125,26 @@ export async function updateUser(body: API.UserUpdateRequest, options?: { [key: 
     ...(options || {}),
   })
 }
+
+/** 获取当前登录用户的完整信息 GET /user/get/my */
+export async function getMyUser(options?: { [key: string]: any }) {
+  return request<API.BaseResponseUser>('/user/get/my', {
+    method: 'GET',
+    ...(options || {}),
+  })
+}
+
+/** 当前登录用户更新自己的信息 POST /user/update/my */
+export async function updateMyUser(
+  body: API.UserUpdateRequest,
+  options?: { [key: string]: any }
+) {
+  return request<API.BaseResponseBoolean>('/user/update/my', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    data: body,
+    ...(options || {}),
+  })
+}

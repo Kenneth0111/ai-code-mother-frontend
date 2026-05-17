@@ -211,6 +211,7 @@ declare namespace API {
   type UserUpdateRequest = {
     id?: string
     userName?: string
+    userPassword?: string
     userAvatar?: string
     userProfile?: string
     userRole?: string
