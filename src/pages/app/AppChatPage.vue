@@ -9,6 +9,10 @@
         <span class="app-name-display">{{ appInfo?.appName || '新应用' }}</span>
       </div>
       <div class="header-right">
+        <a-button @click="openAppInfoModal">
+          <template #icon><info-circle-outlined /></template>
+          应用详情
+        </a-button>
         <a-button type="primary" :loading="deploying" @click="handleDeploy">
           <template #icon><cloud-upload-outlined /></template>
           部署
@@ -209,13 +213,48 @@
         </template>
       </a-result>
     </a-modal>
+
+    <!-- App Info Modal -->
+    <a-modal
+      v-model:open="appInfoModalVisible"
+      title="应用详情"
+      :footer="null"
+      :width="460"
+      wrap-class-name="app-info-modal"
+    >
+      <div class="app-info-list">
+        <div class="info-row">
+          <span class="info-label">创建者：</span>
+          <span class="info-value creator-cell">
+            <a-avatar :size="24" :src="appInfo?.user?.userAvatar">
+              {{ (appInfo?.user?.userName || '匿')[0] }}
+            </a-avatar>
+            <span class="creator-name">{{ appInfo?.user?.userName || '匿名用户' }}</span>
+          </span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">创建时间：</span>
+          <span class="info-value">{{ formatDateTime(appInfo?.createTime) }}</span>
+        </div>
+      </div>
+      <div class="app-info-actions">
+        <a-button type="primary" @click="goToEditPage">
+          <template #icon><edit-outlined /></template>
+          修改
+        </a-button>
+        <a-button danger :loading="deleting" @click="handleDelete">
+          <template #icon><delete-outlined /></template>
+          删除
+        </a-button>
+      </div>
+    </a-modal>
   </div>
 </template>
 
 <script lang="ts" setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
 import {
   ArrowLeftOutlined,
   CloudUploadOutlined,
@@ -227,8 +266,12 @@ import {
   ReloadOutlined,
   FileOutlined,
   PauseOutlined,
+  InfoCircleOutlined,
+  EditOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons-vue'
-import { getAppVoById, deployApp } from '@/api/appController'
+import { getAppVoById, deployApp, deleteApp } from '@/api/appController'
+import dayjs from 'dayjs'
 import { formatCode } from '@/utils/codeFormatter'
 import hljs from 'highlight.js/lib/core'
 import javascript from 'highlight.js/lib/languages/javascript'
@@ -294,6 +337,9 @@ const eventSourceRef = ref<EventSource | null>(null)
 
 const deployModalVisible = ref(false)
 const deployUrl = ref('')
+
+const appInfoModalVisible = ref(false)
+const deleting = ref(false)
 
 // 左侧聊天面板宽度（可拖动调整）
 const CHAT_PANEL_MIN_WIDTH = 320
@@ -691,6 +737,50 @@ const handleDeploy = async () => {
 const copyUrl = () => {
   navigator.clipboard.writeText(deployUrl.value).then(() => {
     message.success('链接已复制')
+  })
+}
+
+const formatDateTime = (time?: string): string => {
+  if (!time) return '-'
+  return dayjs(time).format('YYYY-MM-DD HH:mm:ss')
+}
+
+const openAppInfoModal = () => {
+  appInfoModalVisible.value = true
+}
+
+// 关闭"应用详情"弹窗后跳转到完整编辑页
+const goToEditPage = () => {
+  if (!appId.value) return
+  appInfoModalVisible.value = false
+  router.push(`/app/edit/${appId.value}`)
+}
+
+const handleDelete = () => {
+  if (!appId.value) return
+  Modal.confirm({
+    title: '确认删除该应用？',
+    content: '删除后将无法恢复，请谨慎操作。',
+    okText: '删除',
+    okType: 'danger',
+    cancelText: '取消',
+    onOk: async () => {
+      deleting.value = true
+      try {
+        const res = await deleteApp({ id: appId.value })
+        if (res.data.code === 0 && res.data.data) {
+          message.success('删除成功')
+          appInfoModalVisible.value = false
+          router.push('/')
+        } else {
+          message.error('删除失败：' + (res.data.message || '未知错误'))
+        }
+      } catch {
+        message.error('删除失败')
+      } finally {
+        deleting.value = false
+      }
+    },
   })
 }
 
@@ -1229,6 +1319,53 @@ onBeforeUnmount(() => {
 </style>
 
 <style>
+/* App Info Modal —— a-modal 通过 portal 挂载到 body 之外，因此样式需要写在非 scoped 块中。
+   使用 .app-info-modal 命名空间限定作用范围，避免污染其他 Modal。 */
+.app-info-modal .app-info-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.app-info-modal .info-row {
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.app-info-modal .info-label {
+  width: 88px;
+  flex-shrink: 0;
+  color: #7A6555;
+}
+
+.app-info-modal .info-value {
+  flex: 1;
+  color: #4A3728;
+  word-break: break-all;
+}
+
+.app-info-modal .creator-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-info-modal .creator-name {
+  font-weight: 500;
+}
+
+.app-info-modal .app-info-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.app-info-modal .app-info-actions .ant-btn {
+  flex: 1;
+}
+
 /* highlight.js theme - Warm Light (matching site theme) */
 .hljs {
   color: #4A3728;

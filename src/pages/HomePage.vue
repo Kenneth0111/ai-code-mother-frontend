@@ -82,17 +82,18 @@
             </div>
             <div class="app-info">
               <div class="app-name">{{ app.appName || '未命名应用' }}</div>
-              <div class="app-time">创建于 {{ formatRelativeTime(app.createTime) }}</div>
+              <div class="app-time">创建于 {{ formatDate(app.createTime) }}</div>
             </div>
           </div>
         </div>
         <a-empty v-else description="还没有创建应用，快去试试吧" />
       </a-spin>
-      <div v-if="myAppsTotal > 20" class="pagination-wrapper">
+      <div v-if="myAppsTotal > 0" class="pagination-wrapper">
         <a-pagination
           v-model:current="myAppsPage"
           :total="myAppsTotal"
-          :pageSize="20"
+          :pageSize="MY_APPS_PAGE_SIZE"
+          :show-total="(total: number) => `共 ${total} 个应用`"
           @change="fetchMyApps"
           show-less-items
         />
@@ -166,10 +167,8 @@ import {
 import { useLoginUserStore } from '@/stores/loginUser'
 import { addApp, listMyAppVoByPage, listGoodAppVoByPage } from '@/api/appController'
 import dayjs from 'dayjs'
-import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
 
-dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
 
 const router = useRouter()
@@ -179,6 +178,9 @@ const promptText = ref('')
 const creating = ref(false)
 
 const quickTags = ['波普风电商页面', '企业网站', '电商运营后台', '暗黑话题社区']
+
+// 我的作品分页大小：3 列 × 2 行
+const MY_APPS_PAGE_SIZE = 6
 
 // My Apps
 const myApps = ref<API.AppVO[]>([])
@@ -194,9 +196,9 @@ const featuredAppsTotal = ref(0)
 const featuredAppsLoading = ref(false)
 const featuredAppsSearch = ref('')
 
-const formatRelativeTime = (time?: string) => {
+const formatDate = (time?: string) => {
   if (!time) return '未知'
-  return dayjs(time).fromNow()
+  return dayjs(time).format('YYYY-MM-DD')
 }
 
 const handleCreate = async () => {
@@ -237,7 +239,7 @@ const fetchMyApps = async () => {
   try {
     const res = await listMyAppVoByPage({
       pageNum: myAppsPage.value,
-      pageSize: 20,
+      pageSize: MY_APPS_PAGE_SIZE,
       appName: myAppsSearch.value || undefined,
       sortField: 'createTime',
       sortOrder: 'descend',
