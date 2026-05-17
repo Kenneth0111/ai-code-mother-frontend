@@ -32,7 +32,13 @@
           >
             <!-- AI Avatar -->
             <div v-if="msg.role === 'ai'" class="avatar-wrapper">
-              <a-avatar :size="32" style="background: #FF8C42">🐱</a-avatar>
+              <a-avatar :size="32" :src="logoUrl" class="ai-avatar" />
+            </div>
+            <!-- User Avatar -->
+            <div v-if="msg.role === 'user'" class="avatar-wrapper">
+              <a-avatar :size="32" :src="loginUserStore.loginUser.userAvatar" class="user-avatar">
+                {{ (loginUserStore.loginUser.userName || '我')[0] }}
+              </a-avatar>
             </div>
             <!-- Message Bubble -->
             <div :class="['message-bubble', msg.role === 'user' ? 'user-bubble' : 'ai-bubble']">
@@ -271,6 +277,8 @@ import {
   DeleteOutlined,
 } from '@ant-design/icons-vue'
 import { getAppVoById, deployApp, deleteApp } from '@/api/appController'
+import { useLoginUserStore } from '@/stores/loginUser'
+import logoUrl from '@/assets/logo.png'
 import dayjs from 'dayjs'
 import { formatCode } from '@/utils/codeFormatter'
 import hljs from 'highlight.js/lib/core'
@@ -321,6 +329,7 @@ interface ChatMessage {
 
 const route = useRoute()
 const router = useRouter()
+const loginUserStore = useLoginUserStore()
 
 const appId = ref<string>(route.params.id as string)
 const appInfo = ref<API.AppVO>()
@@ -959,6 +968,22 @@ onBeforeUnmount(() => {
 
 .avatar-wrapper {
   flex-shrink: 0;
+}
+
+.ai-avatar {
+  background: #FFF3E6 !important;
+  border: 1px solid var(--color-border-soft, #F0E4D4);
+  padding: 2px;
+}
+
+.ai-avatar :deep(img) {
+  object-fit: contain;
+}
+
+.user-avatar {
+  background: var(--color-primary, #FF8C42) !important;
+  color: #fff !important;
+  font-weight: 600;
 }
 
 .message-bubble {
