@@ -81,6 +81,11 @@ const originItems = [
     title: '用户管理',
   },
   {
+    key: '/admin/appManage',
+    label: '应用管理',
+    title: '应用管理',
+  },
+  {
     key: 'others',
     label: h('a', { href: 'https://www.codefather.cn', target: '_blank' }, '编程导航'),
     title: '编程导航',
@@ -134,8 +139,10 @@ const doLogout = async () => {
 
 <style scoped>
 .header {
-  background: #fff;
+  background: var(--color-card-bg, #FFFCF5);
   padding: 0 24px;
+  border-bottom: 2px dashed var(--color-border-soft, #F0E4D4);
+  box-shadow: 0 2px 12px rgba(255, 140, 66, 0.06);
 }
 
 .header-left {
@@ -145,17 +152,30 @@ const doLogout = async () => {
 }
 
 .logo {
-  height: 48px;
-  width: 48px;
+  height: 44px;
+  width: 44px;
+  border-radius: 50%;
+  border: 2px solid var(--color-primary-light, #FFB07A);
+  transition: transform 0.3s ease;
+}
+
+.logo:hover {
+  transform: rotate(-5deg) scale(1.08);
 }
 
 .site-title {
   margin: 0;
-  font-size: 18px;
-  color: #1890ff;
+  font-family: var(--font-display, 'ZCOOL KuaiLe', cursive);
+  font-size: 19px;
+  color: var(--color-primary, #FF8C42);
 }
 
 .ant-menu-horizontal {
   border-bottom: none !important;
+  background: transparent !important;
+}
+
+:deep(.ant-menu-horizontal) {
+  background: transparent !important;
 }
 </style>

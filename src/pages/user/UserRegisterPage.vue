@@ -84,23 +84,35 @@ const handleSubmit = async (values: API.UserRegisterRequest) => {
 #userRegisterPage {
   max-width: 480px;
   margin: 0 auto;
+  padding: 32px;
+  background: var(--color-card-bg, #FFFCF5);
+  border-radius: 20px;
+  border: 2px dashed var(--color-border-soft, #F0E4D4);
 }
 
 .title {
+  font-family: var(--font-display, 'ZCOOL KuaiLe', cursive);
   text-align: center;
   margin-bottom: 16px;
+  color: var(--color-text-dark, #4A3728);
 }
 
 .desc {
+  font-family: var(--font-body, 'Long Cang', cursive);
   text-align: center;
-  color: gray;
-  margin-bottom: 16px;
+  color: var(--color-text-mid, #7A6555);
+  margin-bottom: 20px;
 }
 
 .tips {
   text-align: right;
-  color: gray;
-  font-size: 12px;
+  font-family: var(--font-body, 'Long Cang', cursive);
+  color: var(--color-text-light, #A89585);
+  font-size: 14px;
   margin-bottom: 16px;
+}
+
+.tips a {
+  color: var(--color-primary, #FF8C42);
 }
 </style>
