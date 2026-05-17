@@ -48,13 +48,12 @@
             label="用户密码"
             name="userPassword"
             :rules="[
-              { required: true, message: '密码不能为空' },
               { min: 8, message: '密码长度不能小于8位' },
             ]"
           >
             <a-input-password
               v-model:value="formState.userPassword"
-              placeholder="请输入新密码（至少8位）"
+              placeholder="不修改请留空（如修改请输入至少8位）"
               autocomplete="new-password"
             />
           </a-form-item>
@@ -221,13 +220,17 @@ const fetchMyUser = async () => {
 const handleSubmit = async () => {
   submitting.value = true
   try {
-    const res = await updateMyUser({
+    // 仅当用户填写了密码时才提交，否则不修改原密码
+    const payload: UserEditForm = {
       id: formState.id,
       userName: formState.userName,
-      userPassword: formState.userPassword,
       userAvatar: formState.userAvatar,
       userProfile: formState.userProfile,
-    })
+    }
+    if (formState.userPassword && formState.userPassword.trim() !== '') {
+      payload.userPassword = formState.userPassword
+    }
+    const res = await updateMyUser(payload)
     if (res.data.code === 0 && res.data.data) {
       message.success('保存成功')
       // 同步登录用户 store（顶部菜单的头像 / 用户名等需要刷新）
