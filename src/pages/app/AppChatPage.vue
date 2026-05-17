@@ -19,7 +19,7 @@
     <!-- Content Area -->
     <div class="chat-content">
       <!-- Left: Chat Area -->
-      <div class="chat-panel">
+      <div class="chat-panel" :style="{ width: chatPanelWidth + 'px' }">
         <div class="messages-area" ref="messagesRef">
           <div
             v-for="(msg, index) in messages"
@@ -50,7 +50,7 @@
                     <div class="code-block">
                       <div class="code-block-header">
                         <span class="code-lang">{{ block.lang || 'code' }}</span>
-                        <a-button size="small" type="text" class="copy-btn" @click="copyCode(block.content)">
+                        <a-button size="small" type="text" class="copy-btn" @click="copyCode(block.content, block.lang)">
                           <template #icon><copy-outlined /></template>
                         </a-button>
                       </div>
@@ -104,6 +104,16 @@
         </div>
       </div>
 
+      <!-- Resizer: Drag to resize panels -->
+      <div
+        class="panel-resizer"
+        :class="{ 'is-dragging': isResizing }"
+        @mousedown="startResize"
+        title="拖动调整面板宽度"
+      >
+        <div class="resizer-handle"></div>
+      </div>
+
       <!-- Right: Preview/Code Panel -->
       <div class="preview-panel">
         <!-- Panel Tab Bar -->
@@ -130,7 +140,7 @@
             v-if="rightPanelMode === 'preview'"
             size="small"
             type="text"
-            @click="refreshPreview"
+            @click="handleRefreshPreview"
           >
             <template #icon><reload-outlined /></template>
           </a-button>
@@ -219,6 +229,7 @@ import {
   PauseOutlined,
 } from '@ant-design/icons-vue'
 import { getAppVoById, deployApp } from '@/api/appController'
+import { formatCode } from '@/utils/codeFormatter'
 import hljs from 'highlight.js/lib/core'
 import javascript from 'highlight.js/lib/languages/javascript'
 import typescript from 'highlight.js/lib/languages/typescript'
@@ -284,6 +295,61 @@ const eventSourceRef = ref<EventSource | null>(null)
 const deployModalVisible = ref(false)
 const deployUrl = ref('')
 
+// 左侧聊天面板宽度（可拖动调整）
+const CHAT_PANEL_MIN_WIDTH = 320
+const CHAT_PANEL_MAX_RATIO = 0.75 // 最多占据窗口宽度的 75%
+const CHAT_PANEL_STORAGE_KEY = 'chat-panel-width'
+const chatPanelWidth = ref<number>(480)
+const isResizing = ref(false)
+
+// 拖动相关：使用纯 DOM 事件而非 Vue 事件，避免拖动过程中跨元素导致丢失
+let resizeStartX = 0
+let resizeStartWidth = 0
+
+const clampWidth = (w: number): number => {
+  const maxByWindow = Math.floor(window.innerWidth * CHAT_PANEL_MAX_RATIO)
+  return Math.min(Math.max(w, CHAT_PANEL_MIN_WIDTH), maxByWindow)
+}
+
+const doResize = (e: MouseEvent) => {
+  if (!isResizing.value) return
+  const delta = e.clientX - resizeStartX
+  chatPanelWidth.value = clampWidth(resizeStartWidth + delta)
+}
+
+const stopResize = () => {
+  if (!isResizing.value) return
+  isResizing.value = false
+  document.removeEventListener('mousemove', doResize)
+  document.removeEventListener('mouseup', stopResize)
+  // 拖动结束恢复全局样式
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  // 记忆用户偏好
+  try {
+    localStorage.setItem(CHAT_PANEL_STORAGE_KEY, String(chatPanelWidth.value))
+  } catch {
+    // 忽略 localStorage 不可用的情况
+  }
+}
+
+const startResize = (e: MouseEvent) => {
+  e.preventDefault()
+  isResizing.value = true
+  resizeStartX = e.clientX
+  resizeStartWidth = chatPanelWidth.value
+  // 拖动期间禁用文本选中、统一光标
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  document.addEventListener('mousemove', doResize)
+  document.addEventListener('mouseup', stopResize)
+}
+
+// 窗口尺寸变化时，确保面板宽度仍在合法范围内
+const handleWindowResize = () => {
+  chatPanelWidth.value = clampWidth(chatPanelWidth.value)
+}
+
 const parseMessageBlocks = (content: string): MessageBlock[] => {
   if (!content) return []
 
@@ -319,13 +385,16 @@ const parseMessageBlocks = (content: string): MessageBlock[] => {
 
 const highlightCode = (code: string, lang?: string): string => {
   if (!code) return ''
+  // 模型常输出"一行多条声明"的紧凑 CSS / JS，先美化再交给 hljs 上色，
+  // 避免在 UI 中所有代码挤成一行
+  const formatted = formatCode(code, lang)
   try {
     if (lang && hljs.getLanguage(lang)) {
-      return hljs.highlight(code, { language: lang }).value
+      return hljs.highlight(formatted, { language: lang }).value
     }
-    return hljs.highlightAuto(code).value
+    return hljs.highlightAuto(formatted).value
   } catch {
-    return code.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    return formatted.replace(/</g, '&lt;').replace(/>/g, '&gt;')
   }
 }
 
@@ -345,16 +414,28 @@ const codeFiles = computed<CodeFile[]>(() => {
   if (!lastAiMsg) return files
 
   const blocks = parseMessageBlocks(lastAiMsg.content)
+  // 按语言类型分别计数，保证同类型的第 1 个文件使用默认名（如 style.css / script.js）
+  const langCounters: Record<string, number> = {}
   for (const block of blocks) {
     if (block.type === 'code' && block.content) {
       const lang = block.lang || 'plaintext'
       const ext = getExtByLang(lang)
-      const name = guessFileName(block.content, lang, ext, files.length)
+      const key = normalizeLangKey(lang)
+      const sameTypeIndex = langCounters[key] ?? 0
+      const name = guessFileName(block.content, lang, ext, sameTypeIndex)
+      langCounters[key] = sameTypeIndex + 1
       files.push({ name, content: block.content, lang })
     }
   }
   return files
 })
+
+const normalizeLangKey = (lang: string): string => {
+  const l = lang.toLowerCase()
+  if (l === 'js') return 'javascript'
+  if (l === 'ts') return 'typescript'
+  return l
+}
 
 const getExtByLang = (lang: string): string => {
   const map: Record<string, string> = {
@@ -379,8 +460,10 @@ const guessFileName = (content: string, lang: string, ext: string, index: number
   return `file${index > 0 ? index : ''}${ext}`
 }
 
-const copyCode = (code: string) => {
-  navigator.clipboard.writeText(code).then(() => {
+const copyCode = (code: string, lang?: string) => {
+  // 复制时同样使用格式化后的内容，保持与展示一致
+  const formatted = formatCode(code, lang)
+  navigator.clipboard.writeText(formatted).then(() => {
     message.success('代码已复制')
   })
 }
@@ -393,11 +476,56 @@ const scrollToBottom = () => {
   })
 }
 
-const refreshPreview = () => {
-  if (appInfo.value?.codeGenType && appInfo.value?.id) {
-    previewUrl.value = `${BASE_URL}/static/${appInfo.value.codeGenType}_${appInfo.value.id}/`
-    iframeKey.value++
+// 拼接预览静态资源地址
+const buildPreviewUrl = (): string => {
+  if (!appInfo.value?.codeGenType || !appInfo.value?.id) return ''
+  return `${BASE_URL}/static/${appInfo.value.codeGenType}_${appInfo.value.id}/`
+}
+
+// 强制展示预览：无条件设置 previewUrl 并刷新 iframe
+// 用于 SSE done 事件场景——此时后端已确认代码生成完毕，无需再做 HEAD 探测
+const showPreviewDirect = () => {
+  const url = buildPreviewUrl()
+  if (!url) return
+  previewUrl.value = url
+  iframeKey.value++
+}
+
+// 探测静态资源是否已生成（用于挂载时判断历史产物是否存在）
+// retries：失败后再试几次（每次间隔 800ms）
+const probePreview = async (retries = 0): Promise<boolean> => {
+  const url = buildPreviewUrl()
+  if (!url) {
+    previewUrl.value = ''
+    return false
   }
+  try {
+    const resp = await fetch(url, { method: 'HEAD', credentials: 'include' })
+    if (resp.ok) {
+      previewUrl.value = url
+      iframeKey.value++
+      return true
+    }
+  } catch {
+    // 探测失败（CORS / 网络 / 资源不存在）一律走重试 / 占位符兜底
+  }
+  if (retries > 0) {
+    await new Promise((r) => setTimeout(r, 800))
+    return probePreview(retries - 1)
+  }
+  return false
+}
+
+// 用户手动点击刷新按钮：直接重新加载 iframe，让浏览器自己决定 200/404
+const handleRefreshPreview = () => {
+  if (!previewUrl.value) {
+    // 还没设置过 URL，先探测一下，避免直接显示 404
+    probePreview(1).then((ok) => {
+      if (!ok) message.info('预览尚未生成，请稍后再试')
+    })
+    return
+  }
+  iframeKey.value++
 }
 
 const closeEventSource = () => {
@@ -430,17 +558,21 @@ const refreshAppAfterGeneration = async () => {
   const appRes = await getAppVoById({ id: appId.value })
   if (appRes.data.code === 0 && appRes.data.data) {
     appInfo.value = appRes.data.data
-    refreshPreview()
-    rightPanelMode.value = 'preview'
   }
+  // SSE done 已经表明后端代码生成完毕，无需再做 HEAD 探测，直接展示预览
+  // （之前依赖 HEAD 探测时，跨域 / 网络抖动会导致 previewUrl 永远不被设置，
+  //  从而出现「后端已生成、前端不展示」的问题。）
+  showPreviewDirect()
+  rightPanelMode.value = 'preview'
 }
 
 const sendMessage = async (msg: string) => {
   if (!msg.trim() || streaming.value) return
 
   messages.value.push({ role: 'user', content: msg })
-  const aiMsg: ChatMessage = { role: 'ai', content: '', loading: true }
-  messages.value.push(aiMsg)
+  // 占位 AI 消息，记录其在数组中的索引，后续通过索引访问响应式代理对象
+  const aiMsgIndex = messages.value.length
+  messages.value.push({ role: 'ai', content: '', loading: true })
   scrollToBottom()
 
   streaming.value = true
@@ -449,10 +581,14 @@ const sendMessage = async (msg: string) => {
   await new Promise<void>((resolve) => {
     let streamCompleted = false
 
+    // 通过索引获取响应式代理，所有修改必须通过它才能触发模板更新
+    const getAiMsg = () => messages.value[aiMsgIndex]
+
     const finishGeneration = async (shouldRefresh = true) => {
       if (streamCompleted) return
       streamCompleted = true
-      aiMsg.loading = false
+      const aiMsg = getAiMsg()
+      if (aiMsg) aiMsg.loading = false
       streaming.value = false
       closeEventSource()
 
@@ -471,13 +607,15 @@ const sendMessage = async (msg: string) => {
     const handleError = (error?: unknown) => {
       if (streamCompleted) return
       console.error('生成代码失败：', error)
-      aiMsg.loading = false
+      const aiMsg = getAiMsg()
+      if (aiMsg) {
+        aiMsg.loading = false
+        if (!aiMsg.content) {
+          aiMsg.content = '生成失败，请重试'
+        }
+      }
       streaming.value = false
       closeEventSource()
-
-      if (!aiMsg.content) {
-        aiMsg.content = '生成失败，请重试'
-      }
       message.error('生成出错，请重试')
       scrollToBottom()
       resolve()
@@ -493,29 +631,31 @@ const sendMessage = async (msg: string) => {
       })
       eventSourceRef.value = eventSource
 
+      // 流式接收：每一个 chunk 直接通过响应式代理累加到 content，触发实时打字机渲染
       eventSource.onmessage = (event) => {
         if (streamCompleted) return
         const content = parseSseContent(event.data)
-        if (content) {
-          aiMsg.content += content
-          aiMsg.loading = true
-          scrollToBottom()
-        }
+        if (!content) return
+        const aiMsg = getAiMsg()
+        if (!aiMsg) return
+        aiMsg.content += content
+        aiMsg.loading = true
+        scrollToBottom()
       }
 
+      // 后端结束事件：event: done
       eventSource.addEventListener('done', () => {
         void finishGeneration()
       })
 
       eventSource.onerror = (event) => {
         if (streamCompleted) return
-
-        // Some SSE implementations complete by closing the connection without a done event.
-        if (aiMsg.content) {
+        // 部分 SSE 实现会以关闭连接的方式结束，没有显式 done 事件
+        const aiMsg = getAiMsg()
+        if (aiMsg && aiMsg.content) {
           void finishGeneration()
           return
         }
-
         handleError(event)
       }
     } catch (error) {
@@ -555,12 +695,27 @@ const copyUrl = () => {
 }
 
 onMounted(async () => {
+  // 恢复用户上次拖动的面板宽度
+  try {
+    const saved = localStorage.getItem(CHAT_PANEL_STORAGE_KEY)
+    if (saved) {
+      const parsed = Number(saved)
+      if (!Number.isNaN(parsed)) {
+        chatPanelWidth.value = clampWidth(parsed)
+      }
+    }
+  } catch {
+    // 忽略
+  }
+  window.addEventListener('resize', handleWindowResize)
+
   try {
     const res = await getAppVoById({ id: appId.value })
     if (res.data.code === 0 && res.data.data) {
       appInfo.value = res.data.data
+      // 挂载时探测一次历史产物，存在则直接展示；不存在保持占位符
       if (appInfo.value.codeGenType) {
-        refreshPreview()
+        void probePreview(0)
       }
       if (appInfo.value.initPrompt) {
         await sendMessage(appInfo.value.initPrompt)
@@ -577,6 +732,12 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   closeEventSource()
+  // 防止组件卸载时仍有未释放的全局事件监听
+  document.removeEventListener('mousemove', doResize)
+  document.removeEventListener('mouseup', stopResize)
+  window.removeEventListener('resize', handleWindowResize)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
 })
 </script>
 
@@ -631,14 +792,50 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-/* Left Panel - Chat */
+/* Left Panel - Chat：宽度由 :style 内联控制，可拖动调整 */
 .chat-panel {
-  width: 480px;
-  min-width: 380px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--color-border-soft, #F0E4D4);
   background: var(--color-bg-warm, #FFF9EE);
+  overflow: hidden;
+}
+
+/* Resizer：可左右拖动的分隔条 */
+.panel-resizer {
+  flex-shrink: 0;
+  position: relative;
+  width: 6px;
+  cursor: col-resize;
+  background: var(--color-border-soft, #F0E4D4);
+  transition: background-color 0.15s ease;
+  user-select: none;
+}
+
+.panel-resizer:hover,
+.panel-resizer.is-dragging {
+  background: var(--color-primary-light, #FFB07A);
+}
+
+/* 中央把手提示，hover/拖动时更显眼 */
+.resizer-handle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 36px;
+  border-radius: 2px;
+  background: var(--color-text-light, #A89585);
+  opacity: 0.35;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+  pointer-events: none;
+}
+
+.panel-resizer:hover .resizer-handle,
+.panel-resizer.is-dragging .resizer-handle {
+  opacity: 1;
+  background: #fff;
 }
 
 .messages-area {

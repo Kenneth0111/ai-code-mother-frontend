@@ -244,7 +244,8 @@ const fetchMyApps = async () => {
     })
     if (res.data.code === 0 && res.data.data) {
       myApps.value = res.data.data.records ?? []
-      myAppsTotal.value = res.data.data.totalRow ?? 0
+      // 后端 totalRow 可能以字符串形式返回（Long 防精度丢失），需转 Number 以避免 a-pagination 类型告警
+      myAppsTotal.value = Number(res.data.data.totalRow ?? 0)
     }
   } catch {
     // silent
@@ -265,7 +266,7 @@ const fetchFeaturedApps = async () => {
     })
     if (res.data.code === 0 && res.data.data) {
       featuredApps.value = res.data.data.records ?? []
-      featuredAppsTotal.value = res.data.data.totalRow ?? 0
+      featuredAppsTotal.value = Number(res.data.data.totalRow ?? 0)
     }
   } catch {
     // silent
