@@ -267,15 +267,14 @@ onMounted(() => {
 
 <style scoped>
 #userEditPage {
-  width: 100%;
   max-width: 960px;
-  margin: 24px auto;
-  padding: 0 16px;
+  margin: 0 auto;
+  padding: 8px 4px 32px;
   box-sizing: border-box;
 }
 
 .edit-card {
-  width: 100%;
+  width: 720px;
   background: var(--color-card-bg, #fffcf5);
   border-radius: 20px;
   border: 2px dashed var(--color-border-soft, #f0e4d4);
