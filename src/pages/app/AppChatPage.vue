@@ -25,6 +25,19 @@
       <!-- Left: Chat Area -->
       <div class="chat-panel" :style="{ width: chatPanelWidth + 'px' }">
         <div class="messages-area" ref="messagesRef">
+          <!-- 顶部「加载更多历史消息」按钮 -->
+          <div v-if="chatHistoryHasMore && messages.length > 0" class="load-more-wrapper">
+            <a-button
+              size="small"
+              :loading="chatHistoryLoading"
+              @click="loadChatHistory(true)"
+            >
+              加载更多历史消息
+            </a-button>
+          </div>
+          <div v-else-if="!chatHistoryHasMore && messages.length > 0" class="history-end-tip">
+            — 没有更多历史消息了 —
+          </div>
           <div
             v-for="(msg, index) in messages"
             :key="index"
@@ -277,6 +290,7 @@ import {
   DeleteOutlined,
 } from '@ant-design/icons-vue'
 import { getAppVoById, deployApp, deleteApp } from '@/api/appController'
+import { listAppChatHistory } from '@/api/chatHistoryController'
 import { useLoginUserStore } from '@/stores/loginUser'
 import logoUrl from '@/assets/logo.png'
 import dayjs from 'dayjs'
@@ -349,6 +363,13 @@ const deployUrl = ref('')
 
 const appInfoModalVisible = ref(false)
 const deleting = ref(false)
+
+// 对话历史游标分页相关状态
+const CHAT_HISTORY_PAGE_SIZE = 10
+const chatHistoryLoading = ref(false)
+const chatHistoryHasMore = ref(true)
+// 已加载历史消息中「最早一条」的 createTime，用作游标向前翻页
+const earliestCreateTime = ref<string | undefined>(undefined)
 
 // 左侧聊天面板宽度（可拖动调整）
 const CHAT_PANEL_MIN_WIDTH = 320
@@ -529,6 +550,69 @@ const scrollToBottom = () => {
       messagesRef.value.scrollTop = messagesRef.value.scrollHeight
     }
   })
+}
+
+// 后端 ChatHistory -> 前端 ChatMessage
+const convertHistoryToMessage = (h: API.ChatHistory): ChatMessage => ({
+  role: h.messageType === 'ai' ? 'ai' : 'user',
+  content: h.message || '',
+})
+
+// 加载对话历史（游标分页）
+// - 首次加载（isLoadMore = false）：不传 lastCreateTime，返回最新的 N 条 → reverse 后展示到底部
+// - 加载更多（isLoadMore = true）：传当前已加载消息中最早一条的 createTime，向前翻一页
+const loadChatHistory = async (isLoadMore = false) => {
+  if (chatHistoryLoading.value) return
+  if (isLoadMore && !chatHistoryHasMore.value) return
+  chatHistoryLoading.value = true
+  try {
+    // 注意：雪花 ID 长度 18-19 位，超过 Number.MAX_SAFE_INTEGER，
+    // 一旦用 Number() 转换会丢失末几位精度，导致后端按错误 ID 查询时报"应用不存在"。
+    // 因此这里保持字符串形式（typings 因 OpenAPI 自动生成为 number，用断言绕过）。
+    const params: API.listAppChatHistoryParams = {
+      appId: appId.value as unknown as number,
+      pageSize: CHAT_HISTORY_PAGE_SIZE,
+    }
+    if (isLoadMore && earliestCreateTime.value) {
+      params.lastCreateTime = earliestCreateTime.value
+    }
+    const res = await listAppChatHistory(params)
+    if (res.data.code !== 0 || !res.data.data) {
+      message.error('加载对话历史失败：' + (res.data.message || '未知错误'))
+      return
+    }
+    // 后端按 createTime 降序返回，数组最后一条即为「最早」的一条，作为下一次游标
+    const records = res.data.data.records ?? []
+    if (records.length > 0) {
+      const oldest = records[records.length - 1]
+      if (oldest.createTime) {
+        earliestCreateTime.value = oldest.createTime
+      }
+    }
+    // 转换并反转：让 messages 内部保持「上方旧、下方新」的顺序
+    const newMessages = records.map(convertHistoryToMessage).reverse()
+    if (isLoadMore) {
+      // 加载更多时需要保持当前视觉位置不被打乱（防止滚动跳动）
+      const el = messagesRef.value
+      const prevScrollHeight = el?.scrollHeight ?? 0
+      const prevScrollTop = el?.scrollTop ?? 0
+      messages.value.unshift(...newMessages)
+      await nextTick()
+      if (el) {
+        el.scrollTop = el.scrollHeight - prevScrollHeight + prevScrollTop
+      }
+    } else {
+      messages.value.unshift(...newMessages)
+    }
+    // 不足一页 → 没有更多了
+    if (records.length < CHAT_HISTORY_PAGE_SIZE) {
+      chatHistoryHasMore.value = false
+    }
+  } catch {
+    message.error('加载对话历史失败')
+  } finally {
+    chatHistoryLoading.value = false
+  }
 }
 
 // 拼接预览静态资源地址
@@ -810,18 +894,31 @@ onMounted(async () => {
 
   try {
     const res = await getAppVoById({ id: appId.value })
-    if (res.data.code === 0 && res.data.data) {
-      appInfo.value = res.data.data
-      // 挂载时探测一次历史产物，存在则直接展示；不存在保持占位符
-      if (appInfo.value.codeGenType) {
-        void probePreview(0)
-      }
-      if (appInfo.value.initPrompt) {
-        await sendMessage(appInfo.value.initPrompt)
-      }
-    } else {
+    if (res.data.code !== 0 || !res.data.data) {
       message.error('获取应用信息失败')
       router.push('/')
+      return
+    }
+    appInfo.value = res.data.data
+
+    // 加载最近一页对话历史
+    await loadChatHistory(false)
+
+    // 有 ≥ 2 条对话记录时，认为该应用已经生成过产物，直接展示网站预览
+    if (messages.value.length >= 2 && appInfo.value.codeGenType) {
+      void probePreview(0)
+    }
+
+    // 仅当「是应用所有者」且「无任何对话历史」时，才把 initPrompt 作为首条消息自动触发
+    const isOwner =
+      appInfo.value.userId != null &&
+      loginUserStore.loginUser.id != null &&
+      String(appInfo.value.userId) === String(loginUserStore.loginUser.id)
+    if (isOwner && messages.value.length === 0 && appInfo.value.initPrompt) {
+      await sendMessage(appInfo.value.initPrompt)
+    } else {
+      // 已有历史消息：滚到底部，模拟「打开聊天记录」的体验
+      scrollToBottom()
     }
   } catch {
     message.error('获取应用信息失败')
@@ -954,6 +1051,36 @@ onBeforeUnmount(() => {
 
 .messages-area::-webkit-scrollbar-thumb:hover {
   background: #C0A88E;
+}
+
+/* 顶部「加载更多 / 没有更多」提示 */
+.load-more-wrapper {
+  display: flex;
+  justify-content: center;
+  margin: 4px 0 16px;
+}
+
+.load-more-wrapper :deep(.ant-btn) {
+  background: var(--color-card-bg, #FFFCF5) !important;
+  border: 1px dashed var(--color-border-soft, #F0E4D4) !important;
+  color: var(--color-text-mid, #7A6555) !important;
+  border-radius: 16px !important;
+  padding: 0 16px !important;
+  height: 28px !important;
+  font-size: 12px;
+}
+
+.load-more-wrapper :deep(.ant-btn:hover) {
+  color: var(--color-primary, #FF8C42) !important;
+  border-color: var(--color-primary-light, #FFB07A) !important;
+}
+
+.history-end-tip {
+  text-align: center;
+  margin: 4px 0 16px;
+  font-size: 12px;
+  color: var(--color-text-light, #A89585);
+  letter-spacing: 1px;
 }
 
 .message-row {
