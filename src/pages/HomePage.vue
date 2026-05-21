@@ -72,12 +72,19 @@
             class="app-card"
             v-for="app in myApps"
             :key="app.id"
-            @click="goToChat(app.id)"
           >
             <div class="app-cover">
               <img v-if="app.cover" :src="app.cover" alt="cover" />
               <div v-else class="cover-placeholder">
                 <appstore-outlined style="font-size: 40px; color: #bbb" />
+              </div>
+              <div class="app-card-actions">
+                <a-button type="primary" size="small" @click.stop="goToChat(app.id)">
+                  查看对话
+                </a-button>
+                <a-button size="small" @click.stop="goToPreview(app)">
+                  查看作品
+                </a-button>
               </div>
             </div>
             <div class="app-info">
@@ -118,12 +125,24 @@
             class="app-card featured"
             v-for="app in featuredApps"
             :key="app.id"
-            @click="goToChat(app.id)"
           >
             <div class="app-cover">
               <img v-if="app.cover" :src="app.cover" alt="cover" />
               <div v-else class="cover-placeholder">
                 <appstore-outlined style="font-size: 40px; color: #bbb" />
+              </div>
+              <div class="app-card-actions">
+                <a-button
+                  v-if="isMyApp(app)"
+                  type="primary"
+                  size="small"
+                  @click.stop="goToChat(app.id)"
+                >
+                  查看对话
+                </a-button>
+                <a-button size="small" @click.stop="goToPreview(app)">
+                  查看作品
+                </a-button>
               </div>
             </div>
             <div class="app-footer">
@@ -227,10 +246,27 @@ const handleCreate = async () => {
   }
 }
 
+const BASE_URL = 'http://localhost:8123/api'
+
 const goToChat = (appId?: string) => {
   if (appId) {
     router.push(`/app/chat/${appId}`)
   }
+}
+
+const goToPreview = (app: API.AppVO) => {
+  if (app.codeGenType && app.id) {
+    const url = `${BASE_URL}/static/${app.codeGenType}_${app.id}/`
+    window.open(url, '_blank')
+  }
+}
+
+const isMyApp = (app: API.AppVO) => {
+  return (
+    loginUserStore.loginUser.id != null &&
+    app.userId != null &&
+    String(app.userId) === String(loginUserStore.loginUser.id)
+  )
 }
 
 const fetchMyApps = async () => {
@@ -524,12 +560,32 @@ onMounted(() => {
   aspect-ratio: 16 / 10;
   overflow: hidden;
   background: linear-gradient(135deg, #FFF5E8, #FFE8D6);
+  position: relative;
 }
 
 .app-cover img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.app-card-actions {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.app-card:hover .app-card-actions {
+  opacity: 1;
 }
 
 .cover-placeholder {
