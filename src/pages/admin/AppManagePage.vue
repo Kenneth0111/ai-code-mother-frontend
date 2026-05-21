@@ -44,6 +44,17 @@
           <a-image v-if="record.cover" :src="record.cover" :width="80" />
           <span v-else style="color: #ccc">无封面</span>
         </template>
+        <template v-else-if="column.dataIndex === 'deployKey'">
+          <a
+            v-if="record.deployedTime && record.deployKey"
+            :href="`http://localhost/${record.deployKey}/`"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {{ `http://localhost/${record.deployKey}/` }}
+          </a>
+          <span v-else style="color: #ccc">未部署</span>
+        </template>
         <template v-else-if="column.dataIndex === 'priority'">
           <a-tag v-if="record.priority >= 99" color="gold">精选</a-tag>
           <span v-else>{{ record.priority ?? 0 }}</span>
@@ -92,6 +103,7 @@ const columns = ref([
   { title: '应用名称', dataIndex: 'appName', width: 200, ellipsis: true, resizable: true },
   { title: '封面', dataIndex: 'cover', width: 100, resizable: true },
   { title: '代码类型', dataIndex: 'codeGenType', width: 100, resizable: true },
+  { title: '访问链接', dataIndex: 'deployKey', width: 120, resizable: true },
   { title: '优先级', dataIndex: 'priority', width: 90, resizable: true },
   { title: '用户 ID', dataIndex: 'userId', width: 120, resizable: true },
   { title: '创建时间', dataIndex: 'createTime', width: 180, resizable: true },

@@ -182,7 +182,7 @@ import { useLoginUserStore } from '@/stores/loginUser'
 import { getAppVoById, updateApp, adminUpdateApp } from '@/api/appController'
 import dayjs from 'dayjs'
 
-const BASE_URL = 'http://localhost:8123/api'
+const BASE_URL = 'http://localhost'
 
 const route = useRoute()
 const router = useRouter()
@@ -244,7 +244,7 @@ const formRules: Record<string, Rule[]> = {
 // 部署的访问链接：根据 deployKey 构造，未部署时为空
 const deployUrl = computed(() => {
   if (!appInfo.value?.deployedTime || !appInfo.value?.deployKey) return ''
-  return `${BASE_URL}/static/${appInfo.value.deployKey}/`
+  return `${BASE_URL}/${appInfo.value.deployKey}/`
 })
 
 const formatTime = (time?: string): string => {
