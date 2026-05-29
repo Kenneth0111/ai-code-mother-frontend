@@ -172,25 +172,35 @@
         <!-- Code View -->
         <div v-if="rightPanelMode === 'code'" class="code-panel">
           <div v-if="codeFiles.length > 0" class="code-panel-content">
-            <!-- File List -->
+            <!-- File Tree -->
             <div class="file-list">
               <div class="file-list-header">文件</div>
               <div
-                v-for="(file, idx) in codeFiles"
-                :key="idx"
-                :class="['file-item', { active: activeFileIndex === idx }]"
-                @click="activeFileIndex = idx"
+                v-for="item in flatFileTree"
+                :key="item.path"
+                :class="[
+                  'tree-item',
+                  item.type === 'folder' ? 'tree-folder' : 'tree-file',
+                  { active: item.type === 'file' && activeFilePath === item.path },
+                ]"
+                :style="{ paddingLeft: 12 + item.depth * 16 + 'px' }"
+                @click="handleTreeItemClick(item)"
               >
-                <file-outlined />
-                <span class="file-name">{{ file.name }}</span>
+                <span class="tree-icon">
+                  <folder-open-outlined v-if="item.type === 'folder' && expandedKeys.has(item.path)" />
+                  <folder-outlined v-else-if="item.type === 'folder'" />
+                  <file-outlined v-else />
+                </span>
+                <span class="file-name">{{ item.name }}</span>
               </div>
             </div>
             <!-- File Content -->
             <div class="file-content">
               <div class="file-content-header">
-                <span>{{ codeFiles[activeFileIndex]?.name }}</span>
+                <span>{{ activeFile?.path || '请选择文件' }}</span>
               </div>
-              <pre class="file-code"><code v-html="highlightCode(codeFiles[activeFileIndex]?.content || '', codeFiles[activeFileIndex]?.lang)"></code></pre>
+              <pre v-if="activeFile" class="file-code"><code v-html="highlightCode(activeFile.content || '', activeFile.lang)"></code></pre>
+              <div v-else class="file-empty-tip">从左侧选择文件查看代码</div>
             </div>
           </div>
           <div v-else class="panel-placeholder">
@@ -255,6 +265,16 @@
           <span class="info-label">创建时间：</span>
           <span class="info-value">{{ formatDateTime(appInfo?.createTime) }}</span>
         </div>
+        <div v-if="appInfo?.deployKey" class="info-row">
+          <span class="info-label">部署地址：</span>
+          <span class="info-value">
+            <a :href="deployedAppUrl" target="_blank" rel="noopener noreferrer">{{ deployedAppUrl }}</a>
+          </span>
+        </div>
+        <div v-if="appInfo?.deployedTime" class="info-row">
+          <span class="info-label">部署时间：</span>
+          <span class="info-value">{{ formatDateTime(appInfo?.deployedTime) }}</span>
+        </div>
       </div>
       <div class="app-info-actions">
         <a-button type="primary" @click="goToEditPage">
@@ -271,7 +291,7 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import {
@@ -284,6 +304,8 @@ import {
   EyeOutlined,
   ReloadOutlined,
   FileOutlined,
+  FolderOutlined,
+  FolderOpenOutlined,
   PauseOutlined,
   InfoCircleOutlined,
   EditOutlined,
@@ -295,6 +317,16 @@ import { useLoginUserStore } from '@/stores/loginUser'
 import logoUrl from '@/assets/logo.png'
 import dayjs from 'dayjs'
 import { formatCode } from '@/utils/codeFormatter'
+import {
+  buildFileTree,
+  collectFolderPaths,
+  findFileInTree,
+  flattenFileTree,
+  getFirstFilePath,
+  parseCodeFilesFromMessages,
+  type CodeFile,
+  type FlatTreeItem,
+} from '@/utils/fileTree'
 import hljs from 'highlight.js/lib/core'
 import javascript from 'highlight.js/lib/languages/javascript'
 import typescript from 'highlight.js/lib/languages/typescript'
@@ -329,12 +361,6 @@ interface MessageBlock {
   lang?: string
 }
 
-interface CodeFile {
-  name: string
-  content: string
-  lang: string
-}
-
 interface ChatMessage {
   role: 'user' | 'ai'
   content: string
@@ -355,11 +381,17 @@ const previewUrl = ref('')
 const iframeKey = ref(0)
 const messagesRef = ref<HTMLElement>()
 const rightPanelMode = ref<'code' | 'preview'>('preview')
-const activeFileIndex = ref(0)
+const activeFilePath = ref('')
+const expandedKeys = ref<Set<string>>(new Set())
 const eventSourceRef = ref<EventSource | null>(null)
 
 const deployModalVisible = ref(false)
 const deployUrl = ref('')
+
+const deployedAppUrl = computed(() => {
+  if (!appInfo.value?.deployKey) return ''
+  return `http://localhost/${appInfo.value.deployKey}/`
+})
 
 const appInfoModalVisible = ref(false)
 const deleting = ref(false)
@@ -484,57 +516,55 @@ const renderInlineText = (text: string): string => {
     .replace(/\n/g, '<br/>')
 }
 
-const codeFiles = computed<CodeFile[]>(() => {
-  const files: CodeFile[] = []
-  const lastAiMsg = [...messages.value].reverse().find(m => m.role === 'ai' && m.content)
-  if (!lastAiMsg) return files
+const codeFiles = computed<CodeFile[]>(() => parseCodeFilesFromMessages(messages.value))
 
-  const blocks = parseMessageBlocks(lastAiMsg.content)
-  // 按语言类型分别计数，保证同类型的第 1 个文件使用默认名（如 style.css / script.js）
-  const langCounters: Record<string, number> = {}
-  for (const block of blocks) {
-    if (block.type === 'code' && block.content) {
-      const lang = block.lang || 'plaintext'
-      const ext = getExtByLang(lang)
-      const key = normalizeLangKey(lang)
-      const sameTypeIndex = langCounters[key] ?? 0
-      const name = guessFileName(block.content, lang, ext, sameTypeIndex)
-      langCounters[key] = sameTypeIndex + 1
-      files.push({ name, content: block.content, lang })
-    }
+const fileTree = computed(() => buildFileTree(codeFiles.value))
+
+const flatFileTree = computed(() => flattenFileTree(fileTree.value, expandedKeys.value))
+
+const activeFile = computed(() => {
+  if (!activeFilePath.value) return undefined
+  const node = findFileInTree(fileTree.value, activeFilePath.value)
+  if (!node || node.type !== 'file') return undefined
+  return {
+    path: node.path,
+    name: node.name,
+    content: node.content || '',
+    lang: node.lang || 'plaintext',
   }
-  return files
 })
 
-const normalizeLangKey = (lang: string): string => {
-  const l = lang.toLowerCase()
-  if (l === 'js') return 'javascript'
-  if (l === 'ts') return 'typescript'
-  return l
+const handleTreeItemClick = (item: FlatTreeItem) => {
+  if (item.type === 'folder') {
+    const next = new Set(expandedKeys.value)
+    if (next.has(item.path)) {
+      next.delete(item.path)
+    } else {
+      next.add(item.path)
+    }
+    expandedKeys.value = next
+    return
+  }
+  activeFilePath.value = item.path
 }
 
-const getExtByLang = (lang: string): string => {
-  const map: Record<string, string> = {
-    html: '.html', css: '.css', javascript: '.js', js: '.js',
-    typescript: '.ts', ts: '.ts', vue: '.vue', jsx: '.jsx',
-    tsx: '.tsx', json: '.json', python: '.py', java: '.java',
-    scss: '.scss', less: '.less', xml: '.xml', yaml: '.yml',
-  }
-  return map[lang] || `.${lang}`
-}
-
-const guessFileName = (content: string, lang: string, ext: string, index: number): string => {
-  if (lang === 'html' || ext === '.html') {
-    return 'index.html'
-  }
-  if (lang === 'css' || ext === '.css') {
-    return index === 0 ? 'style.css' : `style${index}.css`
-  }
-  if (lang === 'javascript' || lang === 'js') {
-    return index === 0 ? 'script.js' : `script${index}.js`
-  }
-  return `file${index > 0 ? index : ''}${ext}`
-}
+watch(
+  fileTree,
+  (tree) => {
+    if (tree.length === 0) {
+      activeFilePath.value = ''
+      expandedKeys.value = new Set()
+      return
+    }
+    // 默认展开所有目录（不含 dist / node_modules）
+    expandedKeys.value = new Set(collectFolderPaths(tree))
+    const firstFile = getFirstFilePath(tree)
+    if (firstFile && (!activeFilePath.value || !findFileInTree(tree, activeFilePath.value))) {
+      activeFilePath.value = firstFile
+    }
+  },
+  { immediate: true },
+)
 
 const copyCode = (code: string, lang?: string) => {
   // 复制时同样使用格式化后的内容，保持与展示一致
@@ -618,7 +648,12 @@ const loadChatHistory = async (isLoadMore = false) => {
 // 拼接预览静态资源地址
 const buildPreviewUrl = (): string => {
   if (!appInfo.value?.codeGenType || !appInfo.value?.id) return ''
-  return `${BASE_URL}/static/${appInfo.value.codeGenType}_${appInfo.value.id}/`
+  const base = `${BASE_URL}/static/${appInfo.value.codeGenType}_${appInfo.value.id}`
+  // Vue 工程项目构建产物在 dist/index.html
+  if (appInfo.value.codeGenType === 'vue_project') {
+    return `${base}/dist/index.html`
+  }
+  return `${base}/`
 }
 
 // 强制展示预览：无条件设置 previewUrl 并刷新 iframe
@@ -698,11 +733,12 @@ const refreshAppAfterGeneration = async () => {
   if (appRes.data.code === 0 && appRes.data.data) {
     appInfo.value = appRes.data.data
   }
-  // SSE done 已经表明后端代码生成完毕，无需再做 HEAD 探测，直接展示预览
-  // （之前依赖 HEAD 探测时，跨域 / 网络抖动会导致 previewUrl 永远不被设置，
-  //  从而出现「后端已生成、前端不展示」的问题。）
   showPreviewDirect()
   rightPanelMode.value = 'preview'
+  // Vue 工程在 SSE 结束后还会异步执行 npm install + build，需轮询等待 dist 就绪
+  if (appInfo.value.codeGenType === 'vue_project') {
+    void probePreview(30)
+  }
 }
 
 const sendMessage = async (msg: string) => {
@@ -812,17 +848,24 @@ const handleSend = () => {
 
 const handleDeploy = async () => {
   deploying.value = true
+  const hideLoading = message.loading('正在构建并部署应用，可能需要几分钟，请耐心等待...', 0)
   try {
     const res = await deployApp({ appId: appId.value })
     if (res.data.code === 0 && res.data.data) {
       deployUrl.value = res.data.data
       deployModalVisible.value = true
+      // 刷新应用信息以获取最新的 deployKey 和 deployedTime
+      const appRes = await getAppVoById({ id: appId.value })
+      if (appRes.data.code === 0 && appRes.data.data) {
+        appInfo.value = appRes.data.data
+      }
     } else {
       message.error('部署失败：' + (res.data.message || '未知错误'))
     }
   } catch {
-    message.error('部署失败')
+    message.error('部署失败，请检查代码是否已生成或网络是否正常')
   } finally {
+    hideLoading()
     deploying.value = false
   }
 }
@@ -906,7 +949,8 @@ onMounted(async () => {
 
     // 有 ≥ 2 条对话记录时，认为该应用已经生成过产物，直接展示网站预览
     if (messages.value.length >= 2 && appInfo.value.codeGenType) {
-      void probePreview(0)
+      const retries = appInfo.value.codeGenType === 'vue_project' ? 30 : 0
+      void probePreview(retries)
     }
 
     // 仅当「是应用所有者」且「无任何对话历史」时，才把 initPrompt 作为首条消息自动触发
@@ -1344,11 +1388,13 @@ onBeforeUnmount(() => {
 }
 
 .file-list {
-  width: 180px;
-  min-width: 140px;
+  width: 220px;
+  min-width: 180px;
+  max-width: 280px;
   border-right: 1px solid var(--color-border-soft, #F0E4D4);
   background: rgba(255, 255, 255, 0.6);
   overflow-y: auto;
+  flex-shrink: 0;
 }
 
 .file-list-header {
@@ -1358,34 +1404,57 @@ onBeforeUnmount(() => {
   color: var(--color-text-light, #A89585);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  position: sticky;
+  top: 0;
+  background: rgba(255, 255, 255, 0.95);
+  z-index: 1;
 }
 
-.file-item {
+.tree-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: 6px;
+  padding: 6px 12px 6px 0;
   cursor: pointer;
   font-size: 13px;
   color: var(--color-text-mid, #7A6555);
-  transition: all 0.15s;
+  transition: background-color 0.15s, color 0.15s;
+  user-select: none;
 }
 
-.file-item:hover {
+.tree-item:hover {
   background: rgba(255, 140, 66, 0.06);
   color: var(--color-text-dark, #4A3728);
 }
 
-.file-item.active {
+.tree-item.active {
   background: rgba(255, 140, 66, 0.12);
   color: var(--color-primary, #FF8C42);
   font-weight: 500;
+}
+
+.tree-folder {
+  font-weight: 500;
+}
+
+.tree-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  font-size: 14px;
+  color: var(--color-text-light, #A89585);
+}
+
+.tree-item.active .tree-icon {
+  color: var(--color-primary, #FF8C42);
 }
 
 .file-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 
 .file-content {
@@ -1398,9 +1467,19 @@ onBeforeUnmount(() => {
 .file-content-header {
   padding: 8px 16px;
   font-size: 13px;
+  font-family: 'Fira Code', 'Consolas', monospace;
   color: var(--color-text-mid, #7A6555);
   background: rgba(255, 255, 255, 0.6);
   border-bottom: 1px solid var(--color-border-soft, #F0E4D4);
+}
+
+.file-empty-tip {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-light, #A89585);
+  font-size: 14px;
 }
 
 .file-code {

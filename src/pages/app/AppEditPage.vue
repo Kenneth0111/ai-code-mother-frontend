@@ -302,18 +302,19 @@ const handleSubmit = async () => {
   submitting.value = true
   try {
     let res
-    // 管理员：可同时更新名称和封面
-    // 普通用户：当前后端 updateApp 仅支持名称
+    const cover = formState.cover.trim()
+    // 管理员：可同时更新名称、封面和优先级
     if (isAdmin.value) {
       res = await adminUpdateApp({
         id: appId,
         appName: trimmedName,
-        cover: formState.cover,
+        cover,
       })
     } else {
       res = await updateApp({
         id: appId,
         appName: trimmedName,
+        cover,
       })
     }
 

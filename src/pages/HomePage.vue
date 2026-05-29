@@ -246,7 +246,8 @@ const handleCreate = async () => {
   }
 }
 
-const BASE_URL = 'http://localhost:8123/api'
+const API_BASE_URL = 'http://localhost:8123/api'
+const DEPLOY_HOST = 'http://localhost'
 
 const goToChat = (appId?: string) => {
   if (appId) {
@@ -255,8 +256,16 @@ const goToChat = (appId?: string) => {
 }
 
 const goToPreview = (app: API.AppVO) => {
+  // 已部署：跳转到 nginx 托管的正式访问地址
+  if (app.deployKey && app.deployedTime) {
+    window.open(`${DEPLOY_HOST}/${app.deployKey}/`, '_blank')
+    return
+  }
+  // 未部署：回退到后端静态预览地址
   if (app.codeGenType && app.id) {
-    const url = `${BASE_URL}/static/${app.codeGenType}_${app.id}/`
+    const base = `${API_BASE_URL}/static/${app.codeGenType}_${app.id}`
+    const url =
+      app.codeGenType === 'vue_project' ? `${base}/dist/index.html` : `${base}/`
     window.open(url, '_blank')
   }
 }

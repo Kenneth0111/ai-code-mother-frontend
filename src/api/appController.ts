@@ -98,7 +98,7 @@ export async function deleteApp(body: API.DeleteRequest, options?: { [key: strin
   })
 }
 
-/** 此处后端没有提供注释 POST /app/deploy */
+/** 部署应用（Vue 项目会执行 npm install + build，耗时较长） POST /app/deploy */
 export async function deployApp(body: API.AppDeployRequest, options?: { [key: string]: any }) {
   return request<API.BaseResponseString>('/app/deploy', {
     method: 'POST',
@@ -106,6 +106,7 @@ export async function deployApp(body: API.AppDeployRequest, options?: { [key: st
       'Content-Type': 'application/json',
     },
     data: body,
+    timeout: 600000,
     ...(options || {}),
   })
 }
