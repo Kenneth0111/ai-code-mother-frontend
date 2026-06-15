@@ -13,6 +13,10 @@
           <template #icon><info-circle-outlined /></template>
           应用详情
         </a-button>
+        <a-button :loading="downloading" @click="handleDownloadCode">
+          <template #icon><download-outlined /></template>
+          下载代码
+        </a-button>
         <a-button type="primary" :loading="deploying" @click="handleDeploy">
           <template #icon><cloud-upload-outlined /></template>
           部署
@@ -310,8 +314,9 @@ import {
   InfoCircleOutlined,
   EditOutlined,
   DeleteOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons-vue'
-import { getAppVoById, deployApp, deleteApp } from '@/api/appController'
+import { getAppVoById, deployApp, deleteApp, downloadAppCode } from '@/api/appController'
 import { listAppChatHistory } from '@/api/chatHistoryController'
 import { useLoginUserStore } from '@/stores/loginUser'
 import logoUrl from '@/assets/logo.png'
@@ -377,6 +382,7 @@ const messages = ref<ChatMessage[]>([])
 const inputText = ref('')
 const streaming = ref(false)
 const deploying = ref(false)
+const downloading = ref(false)
 const previewUrl = ref('')
 const iframeKey = ref(0)
 const messagesRef = ref<HTMLElement>()
@@ -867,6 +873,66 @@ const handleDeploy = async () => {
   } finally {
     hideLoading()
     deploying.value = false
+  }
+}
+
+// 从响应头 Content-Disposition 中解析下载文件名
+const parseFileNameFromHeader = (disposition?: string): string => {
+  if (!disposition) return ''
+  // 优先匹配 RFC 5987 的 filename*（可能含 URL 编码的中文名）
+  const utf8Match = /filename\*=(?:UTF-8'')?["']?([^;"']+)["']?/i.exec(disposition)
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1])
+    } catch {
+      return utf8Match[1]
+    }
+  }
+  const match = /filename=["']?([^;"']+)["']?/i.exec(disposition)
+  return match?.[1] ?? ''
+}
+
+const handleDownloadCode = async () => {
+  if (!appId.value) return
+  downloading.value = true
+  const hideLoading = message.loading('正在打包代码，请稍候...', 0)
+  try {
+    const res = await downloadAppCode(
+      { appId: appId.value as unknown as number },
+      { responseType: 'blob' },
+    )
+    const blob = res.data as Blob
+    // 后端出错时可能返回 JSON 错误体（仍是 blob），这里探测并提示
+    if (blob.type && blob.type.includes('application/json')) {
+      const text = await blob.text()
+      let msg = '下载失败'
+      try {
+        const parsed = JSON.parse(text)
+        msg = '下载失败：' + (parsed.message || '未知错误')
+      } catch {
+        // 解析失败保持默认提示
+      }
+      message.error(msg)
+      return
+    }
+    const disposition = (res.headers?.['content-disposition'] ??
+      res.headers?.['Content-Disposition']) as string | undefined
+    const fileName =
+      parseFileNameFromHeader(disposition) || `${appInfo.value?.appName || appId.value}.zip`
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+    message.success('代码下载成功')
+  } catch {
+    message.error('下载失败，请检查代码是否已生成或网络是否正常')
+  } finally {
+    hideLoading()
+    downloading.value = false
   }
 }
 
