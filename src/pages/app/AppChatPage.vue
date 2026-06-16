@@ -7,6 +7,9 @@
           <template #icon><arrow-left-outlined /></template>
         </a-button>
         <span class="app-name-display">{{ appInfo?.appName || '新应用' }}</span>
+        <a-tag v-if="codeGenTypeLabel" class="code-gen-type-tag" color="blue">
+          {{ codeGenTypeLabel }}
+        </a-tag>
       </div>
       <div class="header-right">
         <a-button @click="openAppInfoModal">
@@ -269,6 +272,12 @@
           <span class="info-label">创建时间：</span>
           <span class="info-value">{{ formatDateTime(appInfo?.createTime) }}</span>
         </div>
+        <div v-if="codeGenTypeLabel" class="info-row">
+          <span class="info-label">生成类型：</span>
+          <span class="info-value">
+            <a-tag class="code-gen-type-tag" color="blue">{{ codeGenTypeLabel }}</a-tag>
+          </span>
+        </div>
         <div v-if="appInfo?.deployKey" class="info-row">
           <span class="info-label">部署地址：</span>
           <span class="info-value">
@@ -397,6 +406,19 @@ const deployUrl = ref('')
 const deployedAppUrl = computed(() => {
   if (!appInfo.value?.deployKey) return ''
   return `http://localhost/${appInfo.value.deployKey}/`
+})
+
+// codeGenType -> 展示文案映射
+const CODE_GEN_TYPE_LABELS: Record<string, string> = {
+  html: 'HTML 单页面',
+  multi_file: 'MULTI_FILE 多文件',
+  vue_project: 'VUE 工程项目',
+}
+
+const codeGenTypeLabel = computed(() => {
+  const type = appInfo.value?.codeGenType
+  if (!type) return ''
+  return CODE_GEN_TYPE_LABELS[type] || type
 })
 
 const appInfoModalVisible = ref(false)
@@ -1084,6 +1106,12 @@ onBeforeUnmount(() => {
   font-weight: 600;
   color: var(--color-text-dark, #4A3728);
   font-family: var(--font-display);
+}
+
+.code-gen-type-tag {
+  margin: 0;
+  border-radius: 6px;
+  font-weight: 500;
 }
 
 .header-right {
