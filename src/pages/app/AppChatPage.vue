@@ -97,6 +97,23 @@
 
         <!-- Input Area -->
         <div class="input-area">
+          <a-alert
+            v-if="selectedElement"
+            class="selected-el-alert"
+            type="info"
+            closable
+            @close="clearSelected"
+          >
+            <template #message>
+              <div class="sel-line">选中元素：{{ selectedElementLabel }}</div>
+            </template>
+            <template #description>
+              <div v-if="selectedElement.textContent" class="sel-line">
+                内容：{{ selectedElement.textContent }}
+              </div>
+              <div class="sel-line">选择器：{{ selectedElement.selector }}</div>
+            </template>
+          </a-alert>
           <div class="input-card">
             <a-textarea
               v-model:value="inputText"
@@ -166,14 +183,31 @@
               预览
             </a-button>
           </div>
-          <a-button
-            v-if="rightPanelMode === 'preview'"
-            size="small"
-            type="text"
-            @click="handleRefreshPreview"
-          >
-            <template #icon><reload-outlined /></template>
-          </a-button>
+          <div v-if="rightPanelMode === 'preview'" class="preview-actions">
+            <a-button
+              size="small"
+              :type="editMode ? 'primary' : 'text'"
+              :danger="editMode"
+              :disabled="!previewUrl"
+              @click="toggleEditMode"
+            >
+              <template #icon><edit-outlined /></template>
+              {{ editMode ? '退出编辑' : '编辑模式' }}
+            </a-button>
+            <a-button
+              size="small"
+              type="text"
+              :disabled="!previewUrl"
+              @click="handleOpenInNewWindow"
+            >
+              <template #icon><export-outlined /></template>
+              新窗口打开
+            </a-button>
+            <a-button size="small" type="text" @click="handleRefreshPreview">
+              <template #icon><reload-outlined /></template>
+              刷新
+            </a-button>
+          </div>
         </div>
 
         <!-- Code View -->
@@ -220,11 +254,17 @@
         <div v-else class="preview-view">
           <div v-if="previewUrl" class="preview-container">
             <iframe
+              ref="previewIframeRef"
               :src="previewUrl"
               class="preview-iframe"
               :key="iframeKey"
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+              @load="onIframeLoad"
             />
+          </div>
+          <div v-else-if="buildingVue" class="panel-placeholder">
+            <LoadingOutlined style="font-size: 48px; color: #D4C4B0" spin />
+            <p>正在构建 Vue 项目，请稍候（约1~3分钟）...</p>
           </div>
           <div v-else class="panel-placeholder">
             <eye-outlined style="font-size: 48px; color: #D4C4B0" />
@@ -316,6 +356,7 @@ import {
   CopyOutlined,
   EyeOutlined,
   ReloadOutlined,
+  ExportOutlined,
   FileOutlined,
   FolderOutlined,
   FolderOpenOutlined,
@@ -324,10 +365,12 @@ import {
   EditOutlined,
   DeleteOutlined,
   DownloadOutlined,
+  LoadingOutlined,
 } from '@ant-design/icons-vue'
 import { getAppVoById, deployApp, deleteApp, downloadAppCode } from '@/api/appController'
 import { listAppChatHistory } from '@/api/chatHistoryController'
 import { useLoginUserStore } from '@/stores/loginUser'
+import { createVisualEditor, type SelectedElementInfo } from '@/utils/visualEditor'
 import logoUrl from '@/assets/logo.png'
 import dayjs from 'dayjs'
 import { formatCode } from '@/utils/codeFormatter'
@@ -368,6 +411,9 @@ hljs.registerLanguage('shell', bash)
 hljs.registerLanguage('scss', scss)
 
 const BASE_URL = 'http://localhost:8123/api'
+// 预览静态资源使用相对路径，经 Vite 代理走主网站同源，
+// 这样可视化编辑才能访问 iframe.contentDocument 注入脚本（同域名前提）
+const PREVIEW_BASE_URL = '/api'
 
 interface MessageBlock {
   type: 'text' | 'code'
@@ -393,8 +439,15 @@ const streaming = ref(false)
 const deploying = ref(false)
 const downloading = ref(false)
 const previewUrl = ref('')
+const buildingVue = ref(false)
 const iframeKey = ref(0)
 const messagesRef = ref<HTMLElement>()
+
+// 可视化编辑相关
+const previewIframeRef = ref<HTMLIFrameElement>()
+const editMode = ref(false)
+const selectedElement = ref<SelectedElementInfo | null>(null)
+const visualEditor = createVisualEditor()
 const rightPanelMode = ref<'code' | 'preview'>('preview')
 const activeFilePath = ref('')
 const expandedKeys = ref<Set<string>>(new Set())
@@ -676,7 +729,7 @@ const loadChatHistory = async (isLoadMore = false) => {
 // 拼接预览静态资源地址
 const buildPreviewUrl = (): string => {
   if (!appInfo.value?.codeGenType || !appInfo.value?.id) return ''
-  const base = `${BASE_URL}/static/${appInfo.value.codeGenType}_${appInfo.value.id}`
+  const base = `${PREVIEW_BASE_URL}/static/${appInfo.value.codeGenType}_${appInfo.value.id}`
   // Vue 工程项目构建产物在 dist/index.html
   if (appInfo.value.codeGenType === 'vue_project') {
     return `${base}/dist/index.html`
@@ -718,6 +771,37 @@ const probePreview = async (retries = 0): Promise<boolean> => {
   return false
 }
 
+// 轮询后端构建状态，构建完成后再展示预览
+const pollBuildStatus = async () => {
+  const maxAttempts = 90 // 最多轮询 90 次，每次 2 秒 = 3 分钟
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const resp = await fetch(`${BASE_URL}/app/build/status?appId=${appId.value}`, {
+        credentials: 'include',
+      })
+      if (resp.ok) {
+        const result = await resp.json()
+        const status = result.data
+        if (status === 'success') {
+          buildingVue.value = false
+          showPreviewDirect()
+          return
+        }
+        if (status === 'failed') {
+          buildingVue.value = false
+          message.error('Vue 项目构建失败，请检查生成的代码')
+          return
+        }
+      }
+    } catch {
+      // 网络错误继续重试
+    }
+    await new Promise((r) => setTimeout(r, 2000))
+  }
+  buildingVue.value = false
+  message.warning('构建超时，请手动刷新预览')
+}
+
 // 用户手动点击刷新按钮：直接重新加载 iframe，让浏览器自己决定 200/404
 const handleRefreshPreview = () => {
   if (!previewUrl.value) {
@@ -728,6 +812,54 @@ const handleRefreshPreview = () => {
     return
   }
   iframeKey.value++
+}
+
+// 选中元素的简要展示文案（标签 + id + class）
+const selectedElementLabel = computed(() => {
+  const el = selectedElement.value
+  if (!el) return ''
+  let label = el.tagName
+  if (el.id) label += `#${el.id}`
+  if (el.className) label += `.${el.className.trim().split(/\s+/).join('.')}`
+  return label
+})
+
+// iframe 加载完成：重新绑定，若处于编辑模式则重新注入编辑脚本
+const onIframeLoad = () => {
+  visualEditor.setIframe(previewIframeRef.value ?? null)
+  if (editMode.value) {
+    visualEditor.enterEditMode()
+  }
+}
+
+// 清除当前选中的元素
+const clearSelected = () => {
+  selectedElement.value = null
+  visualEditor.clearSelection()
+}
+
+// 切换编辑模式
+const toggleEditMode = () => {
+  if (editMode.value) {
+    editMode.value = false
+    visualEditor.exitEditMode()
+    clearSelected()
+    return
+  }
+  // 进入编辑模式前确保停留在预览 tab
+  rightPanelMode.value = 'preview'
+  editMode.value = true
+  visualEditor.setIframe(previewIframeRef.value ?? null)
+  visualEditor.enterEditMode()
+}
+
+// 在新的浏览器标签页中打开生成的网站
+const handleOpenInNewWindow = () => {
+  if (!previewUrl.value) {
+    message.info('预览尚未生成，请稍后再试')
+    return
+  }
+  window.open(previewUrl.value, '_blank')
 }
 
 const closeEventSource = () => {
@@ -761,11 +893,13 @@ const refreshAppAfterGeneration = async () => {
   if (appRes.data.code === 0 && appRes.data.data) {
     appInfo.value = appRes.data.data
   }
-  showPreviewDirect()
   rightPanelMode.value = 'preview'
-  // Vue 工程在 SSE 结束后还会异步执行 npm install + build，需轮询等待 dist 就绪
+  // Vue 工程在 SSE 结束后还会异步执行 npm install + build，需轮询构建状态
   if (appInfo.value.codeGenType === 'vue_project') {
-    void probePreview(30)
+    buildingVue.value = true
+    await pollBuildStatus()
+  } else {
+    showPreviewDirect()
   }
 }
 
@@ -869,8 +1003,18 @@ const sendMessage = async (msg: string) => {
 
 const handleSend = () => {
   if (!inputText.value.trim() || streaming.value) return
-  const msg = inputText.value.trim()
+  let msg = inputText.value.trim()
+  // 若处于编辑模式且选中了元素，把元素信息拼进提示词
+  if (selectedElement.value) {
+    msg = visualEditor.buildPrompt(msg, selectedElement.value)
+  }
   inputText.value = ''
+  // 发送后清除选中并退出编辑模式
+  if (editMode.value || selectedElement.value) {
+    editMode.value = false
+    visualEditor.exitEditMode()
+    selectedElement.value = null
+  }
   sendMessage(msg)
 }
 
@@ -1009,6 +1153,15 @@ const handleDelete = () => {
 }
 
 onMounted(async () => {
+  // 挂载可视化编辑：监听 iframe 回传的选中元素
+  visualEditor.mount()
+  visualEditor.onSelect((info) => {
+    selectedElement.value = info
+  })
+  visualEditor.onClear(() => {
+    selectedElement.value = null
+  })
+
   // 恢复用户上次拖动的面板宽度
   try {
     const saved = localStorage.getItem(CHAT_PANEL_STORAGE_KEY)
@@ -1037,8 +1190,16 @@ onMounted(async () => {
 
     // 有 ≥ 2 条对话记录时，认为该应用已经生成过产物，直接展示网站预览
     if (messages.value.length >= 2 && appInfo.value.codeGenType) {
-      const retries = appInfo.value.codeGenType === 'vue_project' ? 30 : 0
-      void probePreview(retries)
+      if (appInfo.value.codeGenType === 'vue_project') {
+        // Vue 项目：先探测 dist 是否已存在，不存在则轮询构建状态
+        const exists = await probePreview(0)
+        if (!exists) {
+          buildingVue.value = true
+          void pollBuildStatus()
+        }
+      } else {
+        void probePreview(0)
+      }
     }
 
     // 仅当「是应用所有者」且「无任何对话历史」时，才把 initPrompt 作为首条消息自动触发
@@ -1060,6 +1221,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   closeEventSource()
+  visualEditor.destroy()
   // 防止组件卸载时仍有未释放的全局事件监听
   document.removeEventListener('mousemove', doResize)
   document.removeEventListener('mouseup', stopResize)
@@ -1389,6 +1551,28 @@ onBeforeUnmount(() => {
   border-top: 1px solid var(--color-border-soft, #F0E4D4);
 }
 
+/* 选中元素提示 */
+.selected-el-alert {
+  margin-bottom: 8px;
+  border-radius: 10px;
+}
+
+.selected-el-alert .sel-line {
+  font-size: 12px;
+  line-height: 1.6;
+  word-break: break-all;
+}
+
+.selected-el-alert :deep(.ant-alert-message) .sel-line {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.selected-el-alert :deep(.ant-alert-description) .sel-line {
+  font-family: 'Fira Code', 'Consolas', monospace;
+  color: var(--color-text-mid, #7A6555);
+}
+
 .input-card {
   background: var(--color-card-bg, #FFFCF5);
   border-radius: 12px;
@@ -1452,6 +1636,26 @@ onBeforeUnmount(() => {
 .tab-group {
   display: flex;
   gap: 4px;
+}
+
+.preview-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.preview-actions :deep(.ant-btn) {
+  border-radius: 6px !important;
+  font-size: 13px;
+}
+
+.preview-actions :deep(.ant-btn-text) {
+  color: var(--color-text-mid, #7A6555) !important;
+}
+
+.preview-actions :deep(.ant-btn-text:hover) {
+  color: var(--color-primary, #FF8C42) !important;
+  background: rgba(255, 140, 66, 0.08) !important;
 }
 
 .tab-group :deep(.ant-btn) {
