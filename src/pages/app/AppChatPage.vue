@@ -169,7 +169,7 @@
             <a-button
               :type="rightPanelMode === 'code' ? 'primary' : 'text'"
               size="small"
-              @click="rightPanelMode = 'code'"
+              @click="switchRightPanelMode('code')"
             >
               <template #icon><code-outlined /></template>
               代码
@@ -177,7 +177,7 @@
             <a-button
               :type="rightPanelMode === 'preview' ? 'primary' : 'text'"
               size="small"
-              @click="rightPanelMode = 'preview'"
+              @click="switchRightPanelMode('preview')"
             >
               <template #icon><eye-outlined /></template>
               预览
@@ -212,7 +212,11 @@
 
         <!-- Code View -->
         <div v-if="rightPanelMode === 'code'" class="code-panel">
-          <div v-if="codeFiles.length > 0" class="code-panel-content">
+          <div v-if="codeFilesLoading" class="panel-placeholder">
+            <LoadingOutlined style="font-size: 48px; color: #D4C4B0" spin />
+            <p>正在加载项目代码文件...</p>
+          </div>
+          <div v-else-if="codeFiles.length > 0" class="code-panel-content">
             <!-- File Tree -->
             <div class="file-list">
               <div class="file-list-header">文件</div>
@@ -369,6 +373,7 @@ import {
 } from '@ant-design/icons-vue'
 import { getAppVoById, deployApp, deleteApp, downloadAppCode } from '@/api/appController'
 import { listAppChatHistory } from '@/api/chatHistoryController'
+import { listStaticSourceFiles, type SourceFileVO } from '@/api/staticResourceController'
 import { useLoginUserStore } from '@/stores/loginUser'
 import { createVisualEditor, type SelectedElementInfo } from '@/utils/visualEditor'
 import logoUrl from '@/assets/logo.png'
@@ -452,6 +457,9 @@ const rightPanelMode = ref<'code' | 'preview'>('preview')
 const activeFilePath = ref('')
 const expandedKeys = ref<Set<string>>(new Set())
 const eventSourceRef = ref<EventSource | null>(null)
+const projectCodeFiles = ref<CodeFile[]>([])
+const codeFilesLoading = ref(false)
+const codeFilesLoadedKey = ref('')
 
 const deployModalVisible = ref(false)
 const deployUrl = ref('')
@@ -597,7 +605,62 @@ const renderInlineText = (text: string): string => {
     .replace(/\n/g, '<br/>')
 }
 
-const codeFiles = computed<CodeFile[]>(() => parseCodeFilesFromMessages(messages.value))
+const buildSourceDeployKey = (): string => {
+  if (!appInfo.value?.codeGenType || !appInfo.value?.id) return ''
+  return `${appInfo.value.codeGenType}_${appInfo.value.id}`
+}
+
+const normalizeSourceFile = (file: SourceFileVO): CodeFile => ({
+  path: file.path,
+  name: file.name || file.path.split('/').pop() || file.path,
+  content: file.content || '',
+  lang: file.lang || 'plaintext',
+})
+
+const loadProjectCodeFiles = async (force = false) => {
+  const deployKey = buildSourceDeployKey()
+  if (!deployKey || codeFilesLoading.value) return
+  if (!force && codeFilesLoadedKey.value === deployKey) return
+
+  codeFilesLoading.value = true
+  try {
+    const res = await listStaticSourceFiles({ deployKey })
+    if (res.data.code === 0) {
+      projectCodeFiles.value = (res.data.data || []).map(normalizeSourceFile)
+      codeFilesLoadedKey.value = deployKey
+      return
+    }
+    message.warning(res.data.message || '项目代码文件加载失败')
+  } catch {
+    message.warning('项目代码文件加载失败')
+  } finally {
+    codeFilesLoading.value = false
+  }
+}
+
+const switchRightPanelMode = (mode: 'code' | 'preview') => {
+  rightPanelMode.value = mode
+  if (mode === 'code') {
+    void loadProjectCodeFiles()
+  }
+}
+
+watch(
+  () => buildSourceDeployKey(),
+  (deployKey, previousDeployKey) => {
+    if (deployKey !== previousDeployKey) {
+      projectCodeFiles.value = []
+      codeFilesLoadedKey.value = ''
+    }
+  },
+)
+
+const codeFiles = computed<CodeFile[]>(() => {
+  if (projectCodeFiles.value.length > 0) {
+    return projectCodeFiles.value
+  }
+  return parseCodeFilesFromMessages(messages.value)
+})
 
 const fileTree = computed(() => buildFileTree(codeFiles.value))
 

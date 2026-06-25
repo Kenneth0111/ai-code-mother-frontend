@@ -33,6 +33,8 @@ const EXCLUDED_DIRS = new Set(['dist', 'node_modules'])
 /** Vue 工程工具写入文件的消息格式 */
 const TOOL_FILE_REGEX = /\[工具调用🔧\]\s*写入文件\s+([^\n\r]+)\r?\n```(\w*)\r?\n?([\s\S]*?)```/g
 
+const BATCH_TOOL_FILE_REGEX = /^-\s+(.+?)\s+\(\d+\s+bytes\)\r?\n```(\w*)\r?\n?([\s\S]*?)```/gm
+
 const CODE_BLOCK_REGEX = /```(\w*)\n?([\s\S]*?)```/g
 
 const shouldExcludePath = (filePath: string): boolean => {
@@ -102,6 +104,18 @@ const parseToolWrittenFiles = (content: string): CodeFile[] => {
   let match: RegExpExecArray | null
   const regex = new RegExp(TOOL_FILE_REGEX.source, 'g')
   while ((match = regex.exec(content)) !== null) {
+    const path = match[1].trim().replace(/\\/g, '/')
+    if (shouldExcludePath(path)) continue
+    const lang = match[2] || inferLangFromPath(path)
+    files.push({
+      path,
+      name: path.split('/').pop() || path,
+      content: match[3].trim(),
+      lang,
+    })
+  }
+  const batchRegex = new RegExp(BATCH_TOOL_FILE_REGEX.source, 'gm')
+  while ((match = batchRegex.exec(content)) !== null) {
     const path = match[1].trim().replace(/\\/g, '/')
     if (shouldExcludePath(path)) continue
     const lang = match[2] || inferLangFromPath(path)
