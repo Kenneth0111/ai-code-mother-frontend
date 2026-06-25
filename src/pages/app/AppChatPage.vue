@@ -679,9 +679,9 @@ const loadChatHistory = async (isLoadMore = false) => {
   try {
     // 注意：雪花 ID 长度 18-19 位，超过 Number.MAX_SAFE_INTEGER，
     // 一旦用 Number() 转换会丢失末几位精度，导致后端按错误 ID 查询时报"应用不存在"。
-    // 因此这里保持字符串形式（typings 因 OpenAPI 自动生成为 number，用断言绕过）。
+    // 因此这里保持字符串形式，避免雪花 ID 精度丢失。
     const params: API.listAppChatHistoryParams = {
-      appId: appId.value as unknown as number,
+      appId: appId.value,
       pageSize: CHAT_HISTORY_PAGE_SIZE,
     }
     if (isLoadMore && earliestCreateTime.value) {
@@ -731,7 +731,7 @@ const buildPreviewUrl = (): string => {
   if (!appInfo.value?.codeGenType || !appInfo.value?.id) return ''
   const base = `${PREVIEW_BASE_URL}/static/${appInfo.value.codeGenType}_${appInfo.value.id}`
   // Vue 工程项目构建产物在 dist/index.html
-  if (appInfo.value.codeGenType === 'vue_project') {
+  if (appInfo.value?.codeGenType === 'vue_project') {
     return `${base}/dist/index.html`
   }
   return `${base}/`
@@ -895,7 +895,7 @@ const refreshAppAfterGeneration = async () => {
   }
   rightPanelMode.value = 'preview'
   // Vue 工程在 SSE 结束后还会异步执行 npm install + build，需轮询构建状态
-  if (appInfo.value.codeGenType === 'vue_project') {
+  if (appInfo.value?.codeGenType === 'vue_project') {
     buildingVue.value = true
     await pollBuildStatus()
   } else {
@@ -1064,7 +1064,7 @@ const handleDownloadCode = async () => {
   const hideLoading = message.loading('正在打包代码，请稍候...', 0)
   try {
     const res = await downloadAppCode(
-      { appId: appId.value as unknown as number },
+      { appId: appId.value },
       { responseType: 'blob' },
     )
     const blob = res.data as Blob

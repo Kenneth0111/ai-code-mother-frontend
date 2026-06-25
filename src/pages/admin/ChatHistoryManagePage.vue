@@ -175,7 +175,7 @@ const doSearch = () => {
   fetchData()
 }
 
-const goToApp = (appId?: string | number) => {
+const goToApp = (appId?: string) => {
   if (appId == null) return
   window.open(`/app/chat/${appId}`, '_blank')
 }
