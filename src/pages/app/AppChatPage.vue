@@ -1048,6 +1048,43 @@ const sendMessage = async (msg: string) => {
         void finishGeneration()
       })
 
+      // 处理business-error事件（后端限流等错误）
+      // 后端 GlobalExceptionHandler 在 SSE 场景下会发送：
+      //   event: business-error  data: {"error": true, "code": 40100, "message": "..."}
+      // 随后还会发送一个 event: done，因此这里必须先标记 streamCompleted，
+      // 防止 done 事件再触发 finishGeneration 去刷新预览
+      eventSource.addEventListener('business-error', function (event: MessageEvent) {
+        if (streamCompleted) return
+        streamCompleted = true
+
+        let errorMessage = '生成过程中出现错误，请重试'
+        try {
+          const errorData = JSON.parse(event.data)
+          console.error('SSE业务错误：', errorData)
+          if (errorData?.message) {
+            errorMessage = errorData.message
+          }
+        } catch {
+          console.error('无法解析business-error事件数据：', event.data)
+        }
+
+        // 把错误信息写入 AI 消息气泡，让用户在对话流中能看到失败原因
+        const aiMsg = getAiMsg()
+        if (aiMsg) {
+          aiMsg.loading = false
+          aiMsg.content = aiMsg.content
+            ? aiMsg.content + '\n\n❌ ' + errorMessage
+            : '❌ ' + errorMessage
+        }
+
+        message.error(errorMessage)
+        streaming.value = false
+        closeEventSource()
+        scrollToBottom()
+        resolve()
+      })
+
+
       eventSource.onerror = (event) => {
         if (streamCompleted) return
         // 部分 SSE 实现会以关闭连接的方式结束，没有显式 done 事件
