@@ -15,7 +15,7 @@
           <a-textarea
             v-model:value="promptText"
             :auto-size="{ minRows: 2, maxRows: 4 }"
-            placeholder="使用 NoCode 创建一个高效的小工具，帮我计算......"
+            placeholder="使用 NeverCoding 创建一个高效的小工具，帮我计算......"
             class="prompt-input"
             :bordered="false"
             @pressEnter.prevent="handleCreate"
@@ -246,8 +246,9 @@ const handleCreate = async () => {
   }
 }
 
-const API_BASE_URL = 'http://localhost:8123/api'
-const DEPLOY_HOST = 'http://localhost'
+const API_BASE_URL = '/api'
+const DEPLOY_HOST = `${window.location.origin}/dist`
+
 
 const goToChat = (appId?: string) => {
   if (appId) {

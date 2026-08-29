@@ -415,7 +415,7 @@ hljs.registerLanguage('bash', bash)
 hljs.registerLanguage('shell', bash)
 hljs.registerLanguage('scss', scss)
 
-const BASE_URL = 'http://localhost:8123/api'
+const BASE_URL = '/api'
 // 预览静态资源使用相对路径，经 Vite 代理走主网站同源，
 // 这样可视化编辑才能访问 iframe.contentDocument 注入脚本（同域名前提）
 const PREVIEW_BASE_URL = '/api'
@@ -466,7 +466,7 @@ const deployUrl = ref('')
 
 const deployedAppUrl = computed(() => {
   if (!appInfo.value?.deployKey) return ''
-  return `http://localhost/${appInfo.value.deployKey}/`
+  return `${window.location.origin}/dist/${appInfo.value.deployKey}/`
 })
 
 // codeGenType -> 展示文案映射

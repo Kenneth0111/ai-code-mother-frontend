@@ -47,11 +47,11 @@
         <template v-else-if="column.dataIndex === 'deployKey'">
           <a
             v-if="record.deployedTime && record.deployKey"
-            :href="`http://localhost/${record.deployKey}/`"
+            :href="`${DEPLOY_HOST}/${record.deployKey}/`"
             target="_blank"
             rel="noopener noreferrer"
           >
-            {{ `http://localhost/${record.deployKey}/` }}
+            {{ `${DEPLOY_HOST}/${record.deployKey}/` }}
           </a>
           <span v-else style="color: #ccc">未部署</span>
         </template>
@@ -95,6 +95,8 @@ import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { adminListAppVoByPage, adminDeleteApp, adminUpdateApp } from '@/api/appController'
 import dayjs from 'dayjs'
+
+const DEPLOY_HOST = `${window.location.origin}/dist`
 
 const router = useRouter()
 

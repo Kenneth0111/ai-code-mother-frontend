@@ -182,7 +182,7 @@ import { useLoginUserStore } from '@/stores/loginUser'
 import { getAppVoById, updateApp, adminUpdateApp } from '@/api/appController'
 import dayjs from 'dayjs'
 
-const BASE_URL = 'http://localhost'
+const BASE_URL = `${window.location.origin}/dist`
 
 const route = useRoute()
 const router = useRouter()
